@@ -1,0 +1,818 @@
+---
+title: "Walker2019_Enrichment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#setwd("/gpfs/ysm/project/kahle/sp592/Walker2019/"); rmarkdown::render("Walker2019_Enrichment.Rmd")
+install.packages("rmarkdown")
+
+knitr::opts_chunk$set(echo = TRUE)
+install.packages("tidyverse")
+install.packages("useful")
+install.packages("org.Hs.eg.db")
+library(tidyverse)
+library(magrittr)
+library(useful)
+install.packages("BiocManager")
+BiocManager::install("org.Hs.eg.db")
+library(org.Hs.eg.db)
+install.packages("HGNChelper")
+install.packages("ggpubr")
+install.packages("devtools")
+install.packages("egg")
+
+id1 <- id[1:10000]
+id2 <- id[10001:20000]
+id3 <- id[20001:30000]
+id4 <- id[30001:40000]
+id5 <- id[40001:50000]
+id6 <- id[50001:60155]
+library(HGNChelper)
+
+library(ggpubr)
+library(cowplot)
+library(devtools)
+devtools::install_github("tpq/miSciTools")
+library(miSciTools)
+library(egg)
+options(stringsAsFactors=FALSE)
+```
+
+## Reading in the Data
+
+RData object should include:
+
+* hydro.discovery
+  + This is the list of genes that carry significant burden of de novo mutations with high confidence
+
+
+```{r}
+load("enrichment_input.Rdata")
+load("raw_counts_mat.rdata")
+raw.counts.mat <- as.matrix(raw_counts_mat)
+sc.covars <- read.table("sc_covars.txt", header = T, row.names = 1)[(rowSums(raw.counts.mat != 0) >= 3),]
+if ( file.exists("Walker2019_Enrichment.RData") ) {
+    load("Walker2019_Enrichment.RData")
+} else {
+    rm(list=ls())
+    setwd("/gpfs/ysm/project/kahle/sp592/Walker2019")
+
+    load(file="enrichment_input.Rdata") ### gene.covars (gene length, GC contect, mean expression), gene.kmes, gene.colors, gene.names
+
+    #Defining Cell Type Bageckground - Filter for Genes that are expressed in at least 3 cells of the scRNA atlas
+    #load("/gpfs/ysm/project/kahle/sp592/Polioudakis2019/raw_counts_mat.rdata")
+    load("raw_counts_mat.rdata")
+    raw.counts.mat <- as.matrix(raw_counts_mat)
+    sc.covars <- read.table("sc_covars.txt", header = T, row.names = 1)[(rowSums(raw.counts.mat != 0) >= 3),]
+    identical(rownames( raw.counts.mat[(rowSums(raw.counts.mat != 0) >= 3),]), sc.covars$gene) #Check Statement
+    sc.covars <- sc.covars[,-1]
+    background <- rownames(sc.covars)
+    
+    rm(raw_counts_mat, raw.counts.mat)
+
+    #CellType Markers
+    genes.enriched <- read.csv("/gpfs/ysm/project/kahle/sp592/Polioudakis2019/Cluster_enriched_genes.csv", header = T)
+
+    ##gene lists
+    hc.hydro <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/hc.txt", header = F) %$% setNames(V2,V1)
+
+    #p.hydro <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/p.txt", header = F) %$% setNames(V2,V1)
+
+    #human.hydro <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/human.txt", header = F) %$% setNames(V2,V1)
+
+    #mouse.hydro <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/mouse.txt", header = F) %$% setNames(V2,V1)
+    hc.p.cssyn <- read.table("/Users/emrekiziltug/Downloads/hc.p.syn.txt", header = F) %$% setNames(V2,V1)
+    hc.p.csnon <- read.table("/Users/emrekiziltug/Downloads/hc.p.nonsyn.txt", header = F) %$% setNames(V2,V1)
+    hc.cssyn <- read.table("/Users/emrekiziltug/Downloads/hc.syn.txt", header = F) %$% setNames(V2,V1)
+    p.cssyn <- read.table("/Users/emrekiziltug/Downloads/p.syn.txt", header = F) %$% setNames(V2,V1)
+    hc.csnon <- read.table("/Users/emrekiziltug/Downloads/hc.nonsyn.txt", header = F) %$% setNames(V2,V1)
+    p.csnon <- read.table("/Users/emrekiziltug/Downloads/p.nonsyn.txt", header = F) %$% setNames(V2,V1)
+
+    #hc.human <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/hc_human.txt", header = F) %$% setNames(V2,V1)
+
+    #hc.mouse <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/hc_mouse.txt", header = F) %$% setNames(V2,V1)
+
+    hc.p.human <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/hc_p_human.txt", header = F) %$% setNames(V2,V1)
+
+    #hc.p.mouse <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/hc_p_mouse.txt", header = F) %$% setNames(V2,V1)
+
+    hc.p.human.mouse <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/hc_p_human_mouse.txt", header = F) %$% setNames(V2,V1)
+
+    autism.ruzzo.biorxiv <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/autism_ruzzo_biorxiv.txt", header = F) %$% setNames(V2,V1)
+
+    DDD <- read.table("/gpfs/ysm/project/kahle/sp592/gene_lists/DDD_list.txt", header = F) %$% setNames(V2,V1)
+
+    #Genes from De Novo Database
+      db.file <- sprintf("%s", "/Users/emrekiziltug/Downloads/denovo-db.variants.v.1.5.20180217.tsv.gz")
+      HEADER <- c("SampleID", "StudyName", "PubmedID", "NumProbands", 
+              "NumControls", "SequenceType", "PrimaryPhenotype", "Validation", 
+              "Chr", "Position", "Variant", "rsID", "DbsnpBuild", "AncestralAllele", 
+              "1000GenomeCount", "ExacFreq", "EspAaFreq", "EspEaFreq", 
+              "Transcript", "codingDnaSize", "Gene", "FunctionClass", 
+              "cDnaVariant", "ProteinVariant", "Exon_Intron", "PPhen.HDiv", 
+              "PPhen.Hvar", "SIFT", "CADD", "LoFScore", "LRTScore")
+      dnv.db <- read.table(db.file, header = F, sep = "\t")
+      colnames(dnv.db) <- HEADER
+      dnv.db.append <- read.table("/Users/emrekiziltug/Downloads/denovo-db.variants.v.1.5.20180217.txt", header = T)
+      dnv.db <- bind_cols(dnv.db, dnv.db.append)
+
+      rm(db.file, HEADER, dnv.db.append)
+
+      Gandal18.ASD_CNV.genes <- read.table("Gandal18.ASD_CNV.genes.txt", header = F) %$% setNames(V2,V1)
+      Gandal18.SCZ_CNV.genes <- read.table("Gandal18.SCZ_CNV.genes.txt", header = F) %$% setNames(V2,V1)
+
+  save.image(file = "Walker2019_Enrichment.RData")
+
+}
+
+
+```
+
+## Functions
+
+RData object should include:
+
+rareVariantEnrichment calls LoadDiseaseDNVs and LoadDiseaseCNVs to get genes hit by rare de novo varaints or CNVs curated from denovoDB for ASD, ID, SCZ, and developmental disorder
+
+```{r}
+
+.DE_NOVO_GENES <- NULL
+
+##Defining Genes from denovo Database
+diseases <- c("autism", "developmentalDisorder", "intellectualDisability", 
+                  "schizophrenia")
+
+classes <- c("frameshift", "frameshift-near-splice", 
+                 "splice-acceptor", "splice-donor", "start-lost", 
+                 "stop-gained", "stop-gained-near-splice", "stop-lost")
+
+for (disease in diseases) {
+  dnv.sub <- dnv.db %>% filter(PrimaryPhenotype == disease & FunctionClass %in% classes)
+  .DE_NOVO_GENES[[disease]] <- dnv.sub %>% filter(!is.na(ENSEMBL.ID)) %>% filter(!duplicated(Alternate.Gene.Name)) %$% setNames(ENSEMBL.ID, Alternate.Gene.Name)
+}
+
+##Defining Hydrocephalus Genes from CH cohort and autism and DDD papers
+#.DE_NOVO_GENES[["hc.hydro"            ]] <- hc.hydro
+#.DE_NOVO_GENES[["hc.p"                ]] <- hc.p
+#.DE_NOVO_GENES[["hc.p.human"          ]] <- hc.p.human
+#.DE_NOVO_GENES[["hc.p.human.mouse"    ]] <- hc.p.human.mouse
+
+.DE_NOVO_GENES[["hc.csnon"                ]] <- hc.csnon
+.DE_NOVO_GENES[["hc.cssyn"                ]] <- hc.cssyn
+.DE_NOVO_GENES[["p.csnon"                ]] <- p.csnon
+.DE_NOVO_GENES[["p.cssyn"                ]] <- p.cssyn
+.DE_NOVO_GENES[["hc.p.csnon"                ]] <- hc.p.csnon
+.DE_NOVO_GENES[["hc.p.cssyn"                ]] <- hc.p.cssyn
+
+
+
+
+
+.DE_NOVO_GENES[["autism.ruzzo.biorxiv"]] <- autism.ruzzo.biorxiv
+.DE_NOVO_GENES[["DDD"                 ]] <- DDD
+
+.CNV_GENES <- NULL
+
+.CNV_GENES[["autism"       ]] <- Gandal18.ASD_CNV.genes
+.CNV_GENES[["schizophrenia"]] <- Gandal18.SCZ_CNV.genes
+
+dnv.genes <- .DE_NOVO_GENES
+cnv.genes <- .CNV_GENES
+comb.genes <- list()
+for (d in union( names(cnv.genes), names(dnv.genes) ) ) {
+  comb.genes[[d]] <- union( cnv.genes[[d]] , dnv.genes[[d]] )
+}
+mod.df <- as.data.frame(gene.colors) #Module Colors for Each Gene
+mod.df$gene <- rownames(mod.df) #Module Genes
+colnames(mod.df)[1] <- "module"
+
+
+genes    <- mod.df$gene
+modules  <- mod.df$module
+covs     <- gene.covars #covariates include size, GC content, and mean expression in bulk atlas
+data.dir <- getwd()
+
+
+dis.res <- rareVariantEnrichment(genes, modules, covs, 
+                                 background.module = 'grey', competitive = T, 
+                                 resource.dir = data.dir) ##resource.dir where devoDB file is located
+##Function for Module Enrichment (Walker 2019)
+rareVariantEnrichment<-function (gene.names, mod.colors, gene.covars, background.module = NULL, 
+          competitive = F, verbose = T, symbol.type = "ensembl", resource.dir = ".") 
+{
+  if (background.module %>% is.null) {
+    mtab <- table(mod.colors)
+    background.module <- names(mtab)[which.max(mtab)]
+  }
+
+  mod.matrix <- model.matrix(~. - 1, data = data.frame(module = mod.colors) )
+  colnames(mod.matrix) <- gsub("module", "", colnames(mod.matrix) )
+  rownames(mod.matrix) <- gene.names
+  mod.matrix <- cbind(mod.matrix, gene.covars)
+  for (d in names(comb.genes) ) {
+    dmat <- data.frame(
+      foo = gene.names %>% sapply( function(g) { 1 * (g %in% comb.genes[[d]]) })
+      )
+    colnames(dmat) <- d
+    mod.matrix <- cbind(mod.matrix, dmat)
+  }
+  covar.comp <- paste( colnames(gene.covars) , collapse = " + ")
+  results <- NULL
+  if (competitive) {
+    modnames <- paste( unique(mod.colors) , collapse = " + ")
+    for (dis in names(comb.genes) ) {
+      glm.fla <- sprintf("%s ~ 1 + %s + %s - %s", dis, modnames, covar.comp, background.module)
+      #glm.fla <- sprintf("%s ~ %s + %s", dis, modnames, covar.comp)
+      if (verbose) {
+        print(glm.fla)
+      }
+      lm.res <- formula(glm.fla) %>% glm(
+        data    = mod.matrix, 
+        family  = binomial(link = "logit"),
+        control = glm.control(maxit = 100)
+        )
+      coefs <- summary(lm.res)$coefficients
+      mod.idx <-  which( rownames(coefs) %in% mod.colors )
+      pvals <- coefs[, 3] %>% sapply( function(z) { pt(z, df = summary(lm.res)$df.residual, lower.tail = F) })
+      dis.res <- data.frame(module  = rownames(coefs)[mod.idx], 
+                            disease = dis,
+                            beta    = coefs[mod.idx, 1],
+                            se      = coefs[mod.idx, 2],
+                            p       = pvals[mod.idx]
+                            )
+      results <- rbind(results, dis.res)
+    }
+  }
+  else {
+    for (modname in unique(mod.colors) ) {
+      for (dis in names(comb.genes) ) {
+        glm.fla <- sprintf("%s ~ 1 + %s + %s", modname, dis, covar.comp)
+        if (verbose) {
+          print(glm.fla)
+        }
+        lm.res <-  formula(glm.fla) %>% glm(
+          data = mod.matrix, 
+          family = binomial(link = "logit"),
+          control = glm.control(maxit = 100)
+          )
+        coefs <- summary(lm.res)$coefficients
+        pval <- coefs[2, 3] %>% pt(
+          df = summary(lm.res)$df.residual, 
+          lower.tail = F)
+        res.row <- data.frame(
+          module = modname,
+          disease = dis, 
+          beta = coefs[2, 1],
+          se = coefs[2, 2],
+          p = pval)
+        results <- rbind(results, res.row)
+      }
+    }
+  }
+  rownames(results) <- NULL
+  results
+}
+```
+
+##Setting up single cell enrichment
+
+```{r}
+
+##Defining Cell Type Markers
+CELL_TYPE_GENES_ <- NULL
+
+for (cluster in genes.enriched$Cluster %>% unique ) {
+  CELL_TYPE_GENES_[[cluster]] <- genes.enriched %>% filter(Cluster == cluster ) %$% Ensembl %>% unique
+}
+
+#for (Cluster in organoid.markers$cluster %>% unique ) {
+#  CELL_TYPE_GENES_[[as.character(Cluster)]] <- organoid.markers %>% filter(cluster == Cluster ) %$% ENSEMBL.ID %>% unique
+#}
+
+##Function for CellType Enrichment (Walker 2019)
+FitGLMRobust <-function (formula, data, family = binomial(link = "logit"), verbose = F, 
+    accelerate = F) 
+{
+    conv <- F
+    glmres <- NULL
+    ntry <- 1
+    while (!conv && ntry < 2) {
+        if (verbose) {
+            print(sprintf("GLM try %d", ntry))
+        }
+        glmres <- glm(formula, data = data, family = family, 
+            control = glm.control(maxit = 5 * (4 + ntry)))
+        conv <- T
+    }
+    if (!conv) {
+        tryCatch({
+            glmres <- brglm(formula, data = data, family = family, 
+                pl = T)
+        }, error = function(e) {
+            glmres <- NULL
+        })
+    }
+    if (is.null(glmres)) {
+        save(list = ls(), file = "GOUtils.debug.rda")
+        stop("Convergence failure; see GOUtils.debug.rda")
+    }
+    glmres
+}
+
+## call to run enrichment
+ModuleBrainCellEnrich<- function(module.indicator, module.scores, gene.covars=NULL) {
+  # Examine, based gene lists from various sources, the enrichment of the given
+  # modules for particular brain cell indicators.
+  #
+  # inputs:
+  # module.indicator - a binary (0-1) named vector (names being gene names) indicating 
+  #                    presense/absence from module
+  # module.scores    - a continuous named vector (same as module.indicator) indicating a score for 
+  #                    presence/absense from module
+  # gene.covars      - gene covariates (e.g. size, etc.). Rownames the same as `module.indicator`
+  # 
+  # Returns:
+  # a table with cell type, p-value, and odds ratio for enrichment
+  if ( ! all(names(module.indicator) == names(module.scores)) ) {
+    stop('Indicator and score gene names are not the same')
+  }
+  
+  if ( (! is.null(gene.covars)) && ! all(rownames(gene.covars) == names(module.indicator)) ) {
+    stop('Indicator and covariate gene names are not the same')
+  }
+  
+  if ( length(names(CELL_TYPE_GENES_)) == 0 ) {
+    LoadCellTypeGenes()
+  }
+  
+  enrich.results <- data.frame(
+    cell.type = c(),
+    p.ind     = c(),
+    or.ind    = c(),
+    p.score   = c(),
+    or.score  = c()
+    )
+
+  for ( ctype in names(CELL_TYPE_GENES_) ) {
+    glist <- CELL_TYPE_GENES_[[ctype]]
+    is.ctype <- 1 * (names(module.indicator) %in% glist)
+
+    if ( gene.covars %>% is.null ) {
+      df <- data.frame(
+        is.ctype=is.ctype,
+        is.module=module.indicator
+        )
+      glmres <- FitGLMRobust('is.ctype ~ is.module', data=df, family='binomial') #FitGLMRobust
+    } else {
+      df           <- gene.covars 
+      df$is.ctype  <- is.ctype
+      df$is.module <- module.indicator 
+      glmres <- FitGLMRobust('is.ctype ~ . - is.ctype', data=df, family='binomial') #FitGLMRobust
+    }
+
+    pval.id <- pnorm(
+      summary(glmres)$coefficients['is.module', 1],
+      mean=0, 
+      sd=summary(glmres)$coefficients['is.module',2],
+      lower.tail=F)
+    or.id <- exp(summary(glmres)$coefficients['is.module', 1])
+
+    if ( is.null(gene.covars) ) {
+      df <- data.frame(is.ctype=is.ctype, mod.score=module.scores)
+      glmres <- FitGLMRobust('is.ctype ~ mod.score', data=df, family='binomial') #FitGLMRobust
+    } else {
+      df <- gene.covars 
+      df$is.ctype <- is.ctype
+      df$mod.score <- module.scores 
+      glmres <- FitGLMRobust('is.ctype ~ . - is.ctype', data=df, family='binomial') #FitGLMRobust
+    }
+
+    RMD <- mean(module.scores[is.ctype]) - mean(module.scores[!is.ctype])
+    pval.score <- pnorm(summary(glmres)$coefficients['mod.score', 1], mean=0, 
+                        sd=summary(glmres)$coefficients['mod.score',2], lower.tail=F)
+    or.score <- exp(RMD * summary(glmres)$coefficients['mod.score',1]) 
+    mod.res <- data.frame(
+      cell.type = ctype,
+      p.ind = pval.id,
+      or.ind = or.id,
+      p.score=pval.score,
+      or.score=or.score
+      )
+    enrich.results <- rbind(enrich.results, mod.res)
+  }
+
+  N_TESTS = nrow(enrich.results)
+  enrich.results$fdr.ind <- p.adjust(enrich.results$p.ind, method='bonferroni', N_TESTS)
+  enrich.results$fdr.score <- p.adjust(enrich.results$p.score, method='bonferroni', N_TESTS)
+  enrich.results$term <- enrich.results$cell.type
+  enrich.results
+}
+
+
+
+
+
+```
+
+## Obtaining P-values
+
+```{r}
+##Running Module Enrichment
+mod.df <- as.data.frame(gene.colors) #Module Colors for Each Gene
+mod.df$gene <- rownames(mod.df) #Module Genes
+colnames(mod.df)[1] <- "module"
+
+
+genes    <- mod.df$gene
+modules  <- mod.df$module
+covs     <- gene.covars #covariates include size, GC content, and mean expression in bulk atlas
+data.dir <- getwd()
+
+dis.res <- rareVariantEnrichment(genes, modules, covs, 
+                                 background.module = 'grey', competitive = T, 
+                                 resource.dir = data.dir) ##resource.dir where devoDB file is located
+
+
+##adding P value corrections and graphical labels
+dis.res.transform <- NULL
+
+for (gene.set in unique(dis.res$disease) ) {
+  dis.res.transform[[gene.set]] <- dis.res %>% filter(disease == gene.set)
+  dis.res.transform[[gene.set]]$fdr <- dis.res.transform[[gene.set]]$p %>% p.adjust(method="bonferroni", n = unique(dis.res$module) %>% length )
+  dis.res.transform[[gene.set]]$fdr.transform <- -log10(dis.res.transform[[gene.set]]$fdr)
+  dis.res.transform[[gene.set]]$p.transform   <- -log10(dis.res.transform[[gene.set]]$p)
+}
+
+##Filtering Enrichment Results for 7 Modules
+dis.res <- bind_rows(dis.res.transform)
+
+###########
+#scRNA plot component
+###########
+
+
+##Running Cell Type Enrichment
+hydro.cell.type <- NULL
+
+for (i in names(.DE_NOVO_GENES) ) {
+  gene.set <- .DE_NOVO_GENES[[i]]
+  hydro.ind <- { background %in% gene.set } %>% ifelse(1, 0) %>% setNames( background )
+  hydro.scores <- hydro.ind
+  hydro.cell.type[[i]] <- ModuleBrainCellEnrich(hydro.ind, hydro.scores, gene.covars= sc.covars) %>% mutate(disease = i)
+}
+
+##adding P value corrections and graphical labels
+hydro.cell.type <- bind_rows(hydro.cell.type)
+hydro.cell.type$fdr.transform <- -log10(hydro.cell.type$fdr.ind)
+hydro.cell.type$p.transform   <- -log10(hydro.cell.type$p.ind)
+
+
+save.image(file = "Walker2019_Results.RData")
+
+
+```
+
+## Plotting P-values
+
+```{r fig.height=5, fig.width=20}
+
+##Module and Cell Type plots: three possible versions: barplots, dotplots, or tileplots
+
+
+#Here, function designed input gene sets and plot type of your choice
+p.value.plots.module <- function(gene.set, gene.set.label, plot = NULL) {
+
+  module.plot.colors <- c(
+  "black",
+  "blue4",
+  "brown",
+  "cyan4",
+  "darkgreen",
+  "olivedrab4",
+  "grey40",
+  "lightcyan4",
+  "green4",
+  "lightyellow4",
+  "magenta4",
+  "midnightblue",
+  "pink4",
+  "red4",
+  "tan4",
+  "turquoise4",
+  "yellow2")
+
+    dis.res <- dis.res %>% filter(disease %in% names(gene.set))
+    dis.res$disease <- dis.res$disease %>% factor(levels = names(gene.set))
+
+    if(plot == "bar") {
+ggplot(
+    dis.res, 
+    aes(x=module, y= fdr.transform, fill = disease, color = module)
+    ) +
+theme_classic() + 
+theme(
+  plot.title = element_text(face="bold", hjust = 0.5),
+  axis.line        = element_line(colour = "black"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.text.x      = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),
+  axis.text.y      = element_text(angle = 0 , size = 12 ),
+  axis.title.x     = element_blank(),
+  axis.title.y     = element_text(angle = 90, size = 12, face = "bold"),
+  legend.position  = "none" 
+  ) +
+scale_y_continuous(
+  breaks = -log10(0.05),
+  labels = "p = 0.05",
+  limits = c(0, 8)
+  ) +
+geom_bar(stat = "identity", position='dodge', size = 1) +
+geom_text(aes(label = labels), position=position_dodge(width=0.9), vjust= -1, size = 3, fontface = "bold", color = "black") + 
+scale_color_manual(values=module.plot.colors) + 
+scale_fill_grey(start = 0.9, end = 0.1, labels = gene.set) + 
+geom_hline(yintercept = -log10(0.05), color = "black", size=0.5, linetype = "dotted") +
+ggtitle("Module Enrichment") +
+ylab("-log10(adjusted p)") +
+guides(color = FALSE) +
+NULL 
+
+    } else if (plot == "dot") {
+
+  ggplot(dis.res ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(face="bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),
+    axis.text.y = element_text(angle = 0 , size = 12 ),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(angle = 90, size = 12, face = "bold"),
+    axis.ticks.y = element_blank(),
+    axis.line = element_blank(),
+    legend.title     = element_text(size=12, face = "bold"), 
+    legend.text      = element_text(size=10) 
+    ) +
+  geom_point(aes(x = 8, y = module), 
+             size = 0, col = "white") + 
+  geom_hline(yintercept = 1:17, col = "grey80") +
+  geom_vline(xintercept = -log10(0.05), color = "black", size=0.5, linetype = "dotted") +
+  scale_x_continuous(
+  breaks = -log10(0.05),
+  labels = "p = 0.05"
+  ) +
+  geom_point(aes(x = fdr.transform, y = module, size = disease, fill = module), shape = 21, stroke = 1, color = "black", alpha = 0.5) +
+  scale_fill_manual(values=module.plot.colors) +
+  scale_size_manual(values= c(2,4,6,8), labels = gene.set) +
+    geom_text(aes(x = fdr.transform, y = module, label = labels),
+            col = "black",
+            position = position_nudge(x = -0, y = -0.45),
+            size = 3) +
+    xlab("-log10(adjusted p)") +
+    ggtitle("Module Enrichment") +
+    guides(fill = FALSE, size = FALSE) +
+    coord_flip() +
+    NULL
+
+
+    } else if (plot == "tiles") {
+
+
+ggplot(
+    dis.res, 
+    aes(x=module, y= disease)
+    ) +
+geom_tile(aes(fill = fdr.transform), color = "white") +
+scale_fill_gradient(low = "aliceblue", high = "darkseagreen4") +
+scale_y_discrete(labels= gsub("  ", "\n", gene.set)) +
+theme_classic() + 
+theme(
+  plot.title = element_text(face="bold", hjust = 0.5),
+  axis.line        = element_line(colour = "black"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.text.x      = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),
+  axis.text.y      = element_text(angle = 0 , size = 12 ), 
+  axis.title.x     = element_blank(),
+  axis.title.y     = element_text(angle = 90, size = 12, face = "bold"),
+  legend.position  = "top", 
+  legend.title     = element_text(size=12, face = "bold"),
+  legend.text      = element_text(size=10) 
+  ) +
+  geom_text(
+    aes(
+    label = ifelse(fdr <0.05, round(fdr.transform, digits = 1), "")),
+    size = 3,
+    fontface = "bold",
+    color = "black"
+    ) +
+ggtitle("Module Enrichment") +
+ylab(gene.set.label) +
+guides(fill=guide_legend(title="-log10(p adj)")) +
+NULL 
+
+}
+
+}
+
+###########
+#scRNA plot component
+###########
+
+#Here, function designed input gene sets and plot type of your choice
+p.value.plots.celltype <- function(gene.set, gene.set.label, plot = NULL) {
+
+celltype.plot.colors <- c(
+    "darkorchid4",
+    "darkorchid4",
+    "darkmagenta",
+    "darkmagenta",
+    "darksalmon",
+    "darkorange",
+    "darkorange",
+    "darkorange",
+    "darkorange",
+    "darkorange",
+    "firebrick4",
+    "firebrick4",
+    "deeppink4",
+    "bisque4",
+    "azure4",
+    "cadetblue4")
+
+hydro.cell.type <- hydro.cell.type %>% filter(disease %in% names(gene.set))
+hydro.cell.type$disease <- hydro.cell.type$disease %>% factor(levels = names(gene.set))
+
+order.cells <- c("vRG", "oRG", "PgS", "PgG2M", "IP", "ExN", "ExM", "ExM-U", "ExDp1", "ExDp2", "InMGE", "InCGE", "OPC", "End", "Per", "Mic")
+#renamed.cells <- c("Ventricular Radial Glia (vRG)",
+#  "Outer Radial Glia (oRG)",
+#  "Cycling Progenitor: S phase (PgS)",
+#  "Cycling Progenitor: G2/M phase (PgG2M)",
+#  "Intermediate Progenitor (IP)",
+#  "Excitatory Neuron: Migrating (ExN)",
+#  "Excitatory Neuron: Maturing (ExM)",
+#  "Excitatory Neuron: Maturing - Upper Enriched Layer (ExM-U)",
+#  "Excitatory Neuron: Deep Layer 1 (ExDp1)",
+#  "Excitatory Neuron: Deep Layer 2 (ExDp2)",
+#  "Interneuron: MGE (InMGE)",
+#  "Interneuron: CGE (InCGE)",
+#  "Oligodendrocyte Precursor (OPC)",
+#  "Endothelial (End)",
+#  "Pericyte (Per)",
+#  "Microglia (Mic)"
+#  )
+
+hydro.cell.type$cell.type <- hydro.cell.type$cell.type %>% factor(levels = order.cells)
+
+if (plot == "bar") {
+ggplot(
+    hydro.cell.type, 
+    aes(x=cell.type, y= fdr.transform, fill = disease)
+    ) +
+theme_classic() + 
+theme(
+  plot.title = element_text(face="bold", hjust = 0.5),
+  axis.line        = element_line(colour = "black"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.text.x      = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),
+  axis.text.y      = element_blank(),
+  axis.title.x     = element_blank(),
+  axis.title.y     = element_blank(),
+  legend.title     = element_text(size=12, face = "bold"), 
+  legend.text      = element_text(size=10) 
+  ) +
+scale_y_continuous(
+  breaks = -log10(0.05),
+  limits = c(0, 8)
+  ) +
+geom_bar(stat = "identity", position='dodge', size = 1) +
+geom_text(aes(label = labels), position=position_dodge(width=0.9), vjust= -1, size = 3, fontface = "bold") +
+scale_fill_grey(start = 0.9, end = 0.1, labels = gene.set) + 
+geom_hline(yintercept = -log10(0.05), color = "black", size=0.5, linetype = "dotted") +
+xlab("Cell Type") +
+ggtitle("Cell Type Enrichment") +
+NULL
+
+} else if (plot == "dot") {
+
+  ggplot(hydro.cell.type ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(face="bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(angle = 90, size = 12, face = "bold"),
+    axis.ticks.y = element_blank(),
+    axis.line = element_blank(),
+    legend.title     = element_text(size=12, face = "bold"), #add
+    legend.text      = element_text(size=10) #add
+    ) +
+  geom_point(aes(x = 8, y = cell.type), 
+             size = 0, col = "white") + 
+  geom_hline(yintercept = 1:length(order.cells), col = "grey80") +
+  geom_vline(xintercept = -log10(0.05), color = "black", size=0.5, linetype = "dotted") +
+  scale_x_continuous(breaks = -log10(0.05)) +
+  geom_point(aes(x = fdr.transform, y = cell.type, size = disease, fill = cell.type), shape = 21, stroke = 1, color = "black", alpha = 0.5) +
+  scale_fill_manual(values=celltype.plot.colors) +
+  scale_size_manual(values= c(2,4,6,8), labels = gsub("  ", "\n", gene.set)) +
+    geom_text(aes(x = fdr.transform, y = cell.type, label = labels),
+            col = "black",
+            position = position_nudge(x = -0, y = -0.45),
+            size = 3) +
+    xlab("-log10(adjusted p)") +
+    ggtitle("Cell Type Enrichment") +
+    guides(fill = FALSE, size = guide_legend(title=gene.set.label)) +
+    coord_flip() +
+    NULL
+
+
+} else if (plot == "tiles") {
+
+ggplot(
+    hydro.cell.type, 
+    aes(x=cell.type, y= disease)
+    ) +
+geom_tile(aes(fill = fdr.transform), color = "white") +
+scale_fill_gradient(low = "aliceblue", high = "bisque4") +
+scale_y_discrete(labels=gsub("  ", "\n", gene.set)) +
+theme_classic() + 
+theme(
+  plot.title = element_text(face="bold", hjust = 0.5),
+  axis.line        = element_line(colour = "black"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.text.x      = element_text(angle = 45, vjust = 1, size = 12, hjust = 1), 
+  axis.text.y      = element_blank(),
+  axis.title.x     = element_blank(),
+  axis.title.y     = element_blank(),
+  legend.position  = "top", 
+  legend.title     = element_text(size=12, face = "bold"), 
+  legend.text      = element_text(size=10) 
+  ) +
+  geom_text(
+    aes(
+    label = ifelse(fdr.ind <0.05, round(fdr.transform, digits = 1), "")),
+    size = 3,
+    fontface = "bold",
+    color = "black"
+    ) +
+  ggtitle("Cell Type Enrichment") +
+guides(fill=guide_legend(title="-log10(p adj)")) +
+NULL
+
+}
+
+}
+
+#Creating Plots
+#Remember double space for new line
+GeneSet1 <- c(
+  "hc.hydro"         = "High Confidence",
+  "hc.p"             = "High Confidence + Probable",
+  "hc.p.human"       = "High Confidence + Probable  + Known Human",
+  "hc.p.human.mouse" = "High Confidence + Probable  + Known Human + Known Mouse")
+
+
+egg::ggarrange(
+  GeneSet1 %>% p.value.plots.module(plot = "dot"),
+  GeneSet1 %>% p.value.plots.celltype(gene.set.label = "Hydrocephalus Gene Sets", plot = "dot"),
+  nrow = 1,
+  widths=c(dis.res$module %>% unique %>% length, hydro.cell.type$cell.type %>% unique %>% length)
+  )
+
+egg::ggarrange(
+  GeneSet1 %>% p.value.plots.module(plot = "bar"),
+  GeneSet1 %>% p.value.plots.celltype(gene.set.label = "Hydrocephalus Gene Sets", plot = "bar"),
+  nrow = 1,
+  widths=c(dis.res$module %>% unique %>% length, hydro.cell.type$cell.type %>% unique %>% length)
+  )
+
+egg::ggarrange(
+  GeneSet1 %>% p.value.plots.module(gene.set.label = "Hydrocephalus Gene Sets", plot = "tiles"),
+  GeneSet1 %>% p.value.plots.celltype(plot = "tiles"),
+  nrow = 1,
+  widths=c(dis.res$module %>% unique %>% length, hydro.cell.type$cell.type %>% unique %>% length)
+  )
+
+
+GeneSet2 <- c(
+  "hc.p"                 = "Hydrocephalus  (High Confidence + Probable)",
+  "hc.p.human"           = "Hydrocephalus  (High Confidence + Probable + Known Human)",
+  "autism.ruzzo.biorxiv" = "Autism",
+  "DDD"                  = "Developmental Disorder")
+
+
+egg::ggarrange(
+  GeneSet2 %>% p.value.plots.module(gene.set.label = "Disease", plot = "tiles"),
+  GeneSet2 %>% p.value.plots.celltype(plot = "tiles"),
+  nrow = 1,
+  widths=c(dis.res$module %>% unique %>% length, hydro.cell.type$cell.type %>% unique %>% length)
+  )
+
+
+```
+
+```{r}
+sessionInfo()
+```
